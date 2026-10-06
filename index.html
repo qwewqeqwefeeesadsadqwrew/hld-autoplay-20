@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cocos Creator | happylittledaysCN</title>
+<meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1, minimum-scale=1,maximum-scale=1"/>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<meta name="renderer" content="webkit"/>
+<meta name="force-rendering" content="webkit"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+<meta name="msapplication-tap-highlight" content="no">
+<meta name="full-screen" content="yes"/>
+<meta name="x5-fullscreen" content="true"/>
+<meta name="360-fullscreen" content="true"/>
+<meta name="screen-orientation" content="">
+<meta name="x5-orientation" content="">
+<meta name="x5-page-mode" content="app">
+<!-- 页面本身只放自己的代码；游戏素材和脚本全部从官方 CDN 取，由 hook.js 就地打补丁 -->
+<base href="https://static.zuiqiangyingyu.net/wb_webview/happylittledays/h5/">
+<link rel="stylesheet" type="text/css" href="style-mobile.25fc5.css"/>
+<link rel="icon" href="favicon.8de18.ico"/>
+<script>
+(function () {
+  // 本站目录：.../repo/ 或 .../repo（无文件名）都算目录；xx.html 才算文件
+  var p = location.pathname;
+  if (/\/[^\/]*\.[a-z0-9]+$/i.test(p)) p = p.replace(/[^\/]*$/, '');
+  else if (p.charAt(p.length - 1) !== '/') p += '/';
+  var dir = location.origin + p;
+  window.__HLD_BASE__ = dir;
+
+  function loadScript(src, cb) {
+    var s = document.createElement('script');
+    s.src = src;
+    if (cb) s.onload = cb;
+    document.head.appendChild(s);
+  }
+
+  // 先装补丁壳，再拉官方启动脚本（会被 hook 改写），最后挂自动玩
+  loadScript(dir + 'hook.js', function () {
+    loadScript('s.92281.js', function () {
+      loadScript(dir + 'autoplay.js');
+    });
+  });
+})();
+</script>
+</head>
+<body>
+<canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+<div id="splash">
+<div class="progress-bar stripes">
+<span style="width: 0%"></span>
+</div>
+</div>
+</body>
+</html>
