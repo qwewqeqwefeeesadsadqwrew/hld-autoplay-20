@@ -149,6 +149,10 @@
     nextAt: 0, nextClickAt: 0, leftAt: 0, leftTries: 0,
     flipCount: 0,
     levelAt: 0, warned: false, skipDone: false,
+    lvSkip: false,        // 本关是否动用过「跳过」兜底
+    lvFails: 0,           // 本关失败重开了几次
+    lvStartAt: 0,         // 本关开始时刻（统计用；levelAt 会被 pt 引擎当心跳刷新，不能当开始时间用）
+    roundStats: null,     // 本轮质量小结（下面 newRoundStats 建）
     prePatched: false
   };
 
@@ -322,12 +326,58 @@
     'Level-32068': '__L68P'
   };
 
+  // ---- 每轮质量小结：跑完一轮记一行，用来判断「这轮素材能不能用」----
+  var REPORT_KEY = 'happylittledays_roundReports';
+  function newRoundStats() { return { startAt: Date.now(), levels: [] }; }
+
+  function finishRound(st, roundNo, order) {
+    var sec = Math.round((Date.now() - st.startAt) / 1000);
+    var skips = 0, retries = 0, longs = 0, detail = [];
+    for (var i = 0; i < st.levels.length; i++) {
+      var x = st.levels[i];
+      if (x.skip) skips++;
+      retries += (x.fails || 0);
+      if (x.sec >= 180) longs++;
+      detail.push((x.skip ? '!' : '') + String(x.cls).replace('Level-', '') + ' ' + x.sec + 's' + (x.fails ? '×' + (x.fails + 1) : ''));
+    }
+    var clean = (skips === 0);
+    var human = '第 ' + roundNo + ' 轮小结：' + st.levels.length + '/' + CFG.levels + ' 关 · '
+      + (sec / 60).toFixed(1) + ' 分 · 跳过 ' + skips + ' · 重开 ' + retries + ' · 慢关(≥180s) ' + longs
+      + (clean ? ' · 干净 ✓' : ' · 不干净 ✗');
+    log(human, true);
+    log('  每关明细：' + detail.join(' · '));
+
+    var rep = {
+      at: Date.now(), round: roundNo, levels: st.levels.length, target: CFG.levels,
+      totalSec: sec, skips: skips, retries: retries, longs: longs, clean: clean,
+      detail: detail, order: order.slice()
+    };
+    try {   // 留档：刷新页面也不丢（最近 30 轮）
+      var all = JSON.parse(localStorage.getItem(REPORT_KEY) || '[]');
+      all.push(rep); if (all.length > 30) all = all.slice(-30);
+      localStorage.setItem(REPORT_KEY, JSON.stringify(all));
+    } catch (e) {}
+    try {   // 本机版（serve.js）自动落表 → logs/rounds.md；公网版没有这个接口，静默跳过
+      if (/^(localhost$|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(location.hostname)) {
+        fetch(location.origin + '/__round__', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rep) })['catch'](function () {});
+      }
+    } catch (e) {}
+    return rep;
+  }
+  S.roundStats = newRoundStats();
+  AP.__report = function () {   // 手动触发一次小结（调试用）：A.__report()
+    var r = finishRound(S.roundStats, S.round, S.playOrder.slice());
+    S.roundStats = newRoundStats();
+    return r;
+  };
+
   // ---- 卡死兜底：调用游戏自己的「跳过」（等于立刻通关）----
   function trySkip(inst) {
     try {
       var base = findBaseLevel(inst && inst.node);
       if (base && typeof base.skipHandle === 'function') {
         base.skipHandle();
+        S.lvSkip = true;
         return true;
       }
     } catch (e) { log('跳过兜底出错：' + e.message); }
@@ -407,14 +457,25 @@
           S.nextClickAt = 0;
           S.leftAt = 0;
           S.leftTries = 0;
+          // 先记这一关的统计（耗时/是否跳过/重开几次），再 +1 进下一关
+          try {
+            S.roundStats.levels.push({
+              no: S.playOrder[S.completed] + 1, cls: S.curCls || '?',
+              sec: Math.round((Date.now() - (S.lvStartAt || S.levelAt || Date.now())) / 1000),
+              skip: !!S.lvSkip, fails: S.lvFails || 0
+            });
+          } catch (e) {}
           S.completed++;
           log('第 ' + S.round + ' 轮 · 第 ' + S.completed + ' 关通关（' + (S.curCls || '?') + '）', true);
           disposeDriver();
           if (S.completed >= CFG.levels) {
+            var _rno = S.round, _order = S.playOrder.slice();   // 先存档：这轮小结要用刚打完的顺序
             var justPlayed = S.playOrder[S.playOrder.length - 1];   // 新一轮第一关避开刚打完的这关
             do { S.playOrder = shuffled(CFG.levels); } while (S.playOrder[0] === justPlayed);
             S.round++;
             S.completed = 0;
+            try { finishRound(S.roundStats, _rno, _order); } catch (e) { log('小结出错：' + e.message); }
+            S.roundStats = newRoundStats();
             log('第 ' + (S.round - 1) + ' 轮打完 → 第 ' + S.round + ' 轮随机顺序：' + orderStr(S.playOrder), true);
           }
         }
@@ -454,7 +515,8 @@
       if (fc && S.failComp !== fc) {
         S.failComp = fc;
         disposeDriver();
-        S.levelAt = Date.now(); S.warned = false; S.skipDone = false;
+        S.levelAt = Date.now(); S.warned = false; S.skipDone = false; S.lvFails++;
+        S.lvStartAt = Date.now();   // 重开后重新计时（统计口径：「这次尝试」的耗时）
         log('本关失败，自动重开', true);
         setTimeout(function () { try { fc.clickAgainHandle(); } catch (e) { log('重开出错：' + e.message); } }, 700);
       }
@@ -491,6 +553,7 @@
         S.curInst = lv;
         S.curCls = cls;
         S.levelAt = Date.now();
+        S.lvStartAt = Date.now();   // 统计用独立字段（levelAt 被 pt 引擎每帧刷新）
         S.warned = false;
         S.skipDone = false;
         log('开始关卡 ' + cls, true);
